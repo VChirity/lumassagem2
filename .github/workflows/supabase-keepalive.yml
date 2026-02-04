@@ -24,6 +24,7 @@ jobs:
           fi
           COUNT=$(jq length "$CONFIG")
           echo "Encontrados $COUNT projeto(s) para pingar."
+          FAILED=0
           for i in $(seq 0 $((COUNT - 1))); do
             NAME=$(jq -r ".[$i].name" "$CONFIG")
             URL=$(jq -r ".[$i].url" "$CONFIG")
@@ -37,7 +38,15 @@ jobs:
               -H "Authorization: Bearer $KEY" \
               -H "Accept: application/json" \
               "$URL/rest/v1/")
-            echo "[$NAME] HTTP $CODE - projeto ativo."
-            if [ "$CODE" -ge 400 ]; then exit 1; fi
+            if [ "$CODE" -ge 400 ]; then
+              echo "[$NAME] HTTP $CODE - FALHOU (verifique URL e chave publishable)."
+              FAILED=1
+            else
+              echo "[$NAME] HTTP $CODE - projeto ativo."
+            fi
           done
+          if [ "$FAILED" -eq 1 ]; then
+            echo "Um ou mais projetos falharam. Confira a chave publishable (pode estar incompleta)."
+            exit 1
+          fi
           echo "Todos os projetos respondendo."
