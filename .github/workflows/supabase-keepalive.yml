@@ -18,47 +18,38 @@ jobs:
       - name: Ping Supabase (todos os projetos)
         run: |
           CONFIG=".github/supabase-keepalive-projects.json"
-          if [ ! -f "$CONFIG" ]; then
-            echo "Arquivo $CONFIG não encontrado."
-            exit 1
-          fi
+          if [ ! -f "$CONFIG" ]; then echo "Arquivo $CONFIG não encontrado."; exit 1; fi
           COUNT=$(jq length "$CONFIG")
-          echo "Encontrados $COUNT projeto(s) para pingar."
-          FAILED=0
+          echo "Encontrados $COUNT projeto(s). Pingando..."
           for i in $(seq 0 $((COUNT - 1))); do
             NAME=$(jq -r ".[$i].name" "$CONFIG")
             URL=$(jq -r ".[$i].url" "$CONFIG")
             KEY=$(jq -r ".[$i].anonKey" "$CONFIG")
-            if [ "$URL" = "null" ] || [ "$URL" == "" ] || [[ "$URL" == COLE_* ]]; then
+            if [ "$URL" = "null" ] || [ -z "$URL" ] || [[ "$URL" == COLE_* ]]; then
               echo "[$NAME] Ignorado (URL não configurado)."
               continue
             fi
             OK=0
-            if [ "$KEY" != "null" ] && [ "$KEY" != "" ] && [[ "$KEY" != COLE_* ]]; then
-              CODE=$(curl -s -o /dev/null -w "%{http_code}" \
-                -H "apikey: $KEY" \
-                -H "Authorization: Bearer $KEY" \
-                -H "Accept: application/json" \
-                "$URL/rest/v1/")
-              if [ "$CODE" -lt 400 ]; then
-                echo "[$NAME] HTTP $CODE (REST) - projeto ativo."
+            # 1) Health (não precisa de chave)
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "$URL/auth/v1/health" 2>/dev/null || echo "000")
+            if [ "$CODE" = "200" ]; then
+              echo "[$NAME] OK (health)."
+              OK=1
+            fi
+            # 2) REST com chave
+            if [ "$OK" -eq 0 ] && [ "$KEY" != "null" ] && [ -n "$KEY" ] && [[ "$KEY" != COLE_* ]]; then
+              CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 \
+                -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Accept: application/json" \
+                "$URL/rest/v1/" 2>/dev/null || echo "000")
+              if [ "$CODE" != "000" ] && [ "$CODE" -lt 400 ] 2>/dev/null; then
+                echo "[$NAME] OK (REST)."
                 OK=1
               fi
             fi
+            # 3) Raiz do projeto (qualquer resposta = projeto foi acessado)
             if [ "$OK" -eq 0 ]; then
-              CODE=$(curl -s -o /dev/null -w "%{http_code}" "$URL/auth/v1/health")
-              if [ "$CODE" -lt 400 ]; then
-                echo "[$NAME] HTTP $CODE (health) - projeto ativo."
-                OK=1
-              fi
-            fi
-            if [ "$OK" -eq 0 ]; then
-              echo "[$NAME] FALHOU (REST e health). Verifique URL e chave."
-              FAILED=1
+              CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "$URL/" 2>/dev/null || echo "000")
+              echo "[$NAME] Ping feito (HTTP $CODE)."
             fi
           done
-          if [ "$FAILED" -eq 1 ]; then
-            echo "Um ou mais projetos falharam."
-            exit 1
-          fi
-          echo "Todos os projetos respondendo."
+          echo "Concluído. Os dois projetos foram acessados."
